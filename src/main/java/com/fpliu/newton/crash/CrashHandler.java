@@ -5,7 +5,6 @@ import android.content.Context;
 import android.os.Looper;
 import android.os.Process;
 import android.os.SystemClock;
-import android.widget.Toast;
 
 import com.fpliu.newton.log.Logger;
 
@@ -18,6 +17,8 @@ import java.io.File;
  */
 public class CrashHandler implements Thread.UncaughtExceptionHandler {
 
+    private static final String TAG = CrashHandler.class.getSimpleName();
+
     /**
      * 崩溃日志文件名称
      */
@@ -27,37 +28,43 @@ public class CrashHandler implements Thread.UncaughtExceptionHandler {
 
     private Context appContext;
 
-    private CrashHandler(Context appContext) {
+    private TipCallback tipCallback;
+
+    private CrashHandler(Context appContext, TipCallback tipCallback) {
         this.appContext = appContext;
+        this.tipCallback = tipCallback;
         otherUncaughtExceptionHandler = Thread.getDefaultUncaughtExceptionHandler();
     }
 
-    public static void init(Context appContext) {
-        Thread.setDefaultUncaughtExceptionHandler(new CrashHandler(appContext));
+    public static void init(Context appContext, TipCallback tipCallback) {
+        Thread.setDefaultUncaughtExceptionHandler(new CrashHandler(appContext, tipCallback));
     }
 
     @Override
-    public void uncaughtException(Thread thread, final Throwable ex) {
-        Logger.e("DebugLog", "uncaughtException() " + thread.getName(), ex);
+    public void uncaughtException(Thread thread, final Throwable throwable) {
+        Logger.e(TAG, "uncaughtException() " + thread.getName(), throwable);
 
-        // 使用 Toast 来显示异常信息
-        new Thread() {
-            @Override
-            public void run() {
-                Looper.prepare();
-                Toast.makeText(appContext, "程序异常，正要退出", Toast.LENGTH_LONG).show();
-                Looper.loop();
-            }
-        }.start();
+        if (tipCallback != null) {
+            // 在界面上显示异常信息
+            new Thread() {
+                @Override
+                public void run() {
+                    Looper.prepare();
+                    tipCallback.onTip(thread, throwable);
+                    Looper.loop();
+                }
+            }.start();
+        }
 
         // 保存堆栈信息
-        Logger.syncSaveFile(getUncaughtExceptionFile(appContext), ex);
-        // 等待2s
-        SystemClock.sleep(2000);
+        Logger.syncSaveFile(getUncaughtExceptionFile(appContext), throwable);
 
         if (otherUncaughtExceptionHandler != null) {
-            otherUncaughtExceptionHandler.uncaughtException(thread, ex);
+            otherUncaughtExceptionHandler.uncaughtException(thread, throwable);
         }
+
+        // 等待2s
+        SystemClock.sleep(2000);
 
         // 杀死进程
         Process.killProcess(Process.myPid());
@@ -72,5 +79,9 @@ public class CrashHandler implements Thread.UncaughtExceptionHandler {
             logDir.mkdirs();
         }
         return new File(logDir, FILE_UNCAUGHT_EXCEPTION_LOG);
+    }
+
+    public interface TipCallback {
+        void onTip(Thread thread, final Throwable throwable);
     }
 }
